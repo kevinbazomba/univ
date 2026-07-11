@@ -51,7 +51,9 @@ INSTALLED_APPS = [
 
 
 
-
+CSRF_TRUSTED_ORIGINS = [
+    "https://univ-production-8f5a.up.railway.app",
+]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
