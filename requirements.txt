@@ -41,8 +41,7 @@ soupsieve==2.8.4
 sqlparse==0.5.5
 svglib==2.0.2
 tinycss2==1.5.1
-tkcalendar==1.6.1
-ttkthemes==3.3.0
+
 typing_extensions==4.15.0
 tzdata==2025.3
 tzlocal==5.4.3
