@@ -69,7 +69,7 @@ ROOT_URLCONF = 'universite_plateform.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'plateform_react/dist'],
+        'DIRS': [BASE_DIR / 'plateform_react/'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [

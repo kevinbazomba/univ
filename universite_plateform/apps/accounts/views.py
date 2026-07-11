@@ -190,4 +190,4 @@ def refresh_token(request):
 from django.shortcuts import render
 
 def react_app(request):
-    return render(request, 'index.html')
+    return render(request, 'dist/index.html')
