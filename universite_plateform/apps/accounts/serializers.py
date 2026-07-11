@@ -1,0 +1,66 @@
+"""
+SERIALIZERS - Convertissent les données Python en JSON et vice-versa
+"""
+
+from rest_framework import serializers
+from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
+from .models import IdentiteUniversite
+
+
+class IdentiteUniversiteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = IdentiteUniversite
+        fields = '__all__'
+
+# ============================================
+# SERIALIZER POUR L'INSCRIPTION
+# ============================================
+class RegisterSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(
+        write_only=True,
+        required=True,
+        validators=[validate_password]
+    )
+    password2 = serializers.CharField(write_only=True, required=True)
+
+    class Meta:
+        model = User
+        fields = ('username', 'email', 'password', 'password2', 'first_name', 'last_name')
+
+    def validate(self, attrs):
+        if attrs['password'] != attrs['password2']:
+            raise serializers.ValidationError({"password": "Les mots de passe ne correspondent pas"})
+        return attrs
+
+    def create(self, validated_data):
+        validated_data.pop('password2')
+        user = User.objects.create_user(**validated_data)
+        return user
+
+# ============================================
+# SERIALIZER POUR L'AFFICHAGE DE L'UTILISATEUR
+# ============================================
+class UserSerializer(serializers.ModelSerializer):
+    account_type = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = (
+            'id', 'username', 'email', 'first_name', 'last_name',
+            'date_joined', 'is_superuser', 'account_type',
+        )
+
+    def get_account_type(self, obj):
+        if hasattr(obj, 'professeur'):
+            return 'professeur'
+        if obj.is_superuser:
+            return 'superadmin'
+        return 'administration'
+
+# ============================================
+# SERIALIZER POUR LA CONNEXION
+# ============================================
+class LoginSerializer(serializers.Serializer):
+    username = serializers.CharField()
+    password = serializers.CharField()

@@ -1,0 +1,229 @@
+Le problème principal vient de deux choses :
+
+1. Ta version de Node.js est un peu ancienne pour les nouvelles versions de Vite
+2. Ta connexion réseau a coupé (`ECONNRESET`)
+
+---
+
+# Le plus important
+
+Tu as :
+
+```text id="0o1px8"
+Node v20.17.0
+```
+
+Mais Vite demande :
+
+```text id="3r0q4p"
+^20.19.0 ou >=22.12.0
+```
+
+Donc :
+➡ il faut mettre Node.js à jour.
+
+---
+
+# Solution simple
+
+# 1. Désinstaller ancien Node.js
+
+Va dans :
+
+```text id="7x3thg"
+Panneau de configuration
+→ Programmes
+→ Désinstaller un programme
+```
+
+Supprime :
+
+* Node.js
+
+---
+
+# 2. Installer la nouvelle version
+
+Télécharge :
+
+* Node.js LTS récent
+
+[Node.js officiel](https://nodejs.org?utm_source=chatgpt.com)
+
+Prends :
+
+```text id="t9l28w"
+LTS
+```
+
+---
+
+# 3. Vérifier installation
+
+Dans CMD :
+
+```bash id="6jqc4f"
+node -v
+```
+
+Tu dois avoir :
+
+```text id="9nqg67"
+v22.x.x
+```
+
+Puis :
+
+```bash id="e0t2hf"
+npm -v
+```
+
+---
+
+# 4. Supprimer ancien projet cassé
+
+Supprime complètement :
+
+```text id="wqwhww"
+plateform_react
+```
+
+y compris :
+
+```text id="gt7yl6"
+node_modules
+```
+
+---
+
+# 5. Recréer le projet
+
+Dans CMD :
+
+```bash id="q8gc0m"
+npm create vite@latest plateform_react -- --template react
+```
+
+---
+
+# 6. Entrer dans le projet
+
+```bash id="6fgv6t"
+cd plateform_react
+```
+
+---
+
+# 7. Installer dépendances
+
+```bash id="17c0y2"
+npm install
+```
+
+---
+
+# 8. Lancer React
+
+```bash id="s0m0xh"
+npm run dev
+```
+
+---
+
+# Si erreur réseau encore
+
+Fais :
+
+```bash id="hfx4qn"
+npm cache clean --force
+```
+
+Puis :
+
+```bash id="3zdjlwm"
+npm install
+```
+
+---
+
+# Si Windows bloque les fichiers
+
+Ferme :
+
+* VS Code
+* CMD
+* explorateur ouvert sur le projet
+
+Puis supprime :
+
+```text id="7a7g4r"
+node_modules
+package-lock.json
+```
+
+et recommence.
+
+---
+
+# Mon conseil
+
+Pour apprendre React tranquillement :
+
+Utilise seulement :
+
+* React
+* Vite
+* CSS simple
+
+Ne prends pas encore :
+
+* Next.js
+* TypeScript
+* Zustand
+* React Query
+
+Sinon tu vas être submergé rapidement.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# 1. Créer le projet
+npm create vite@latest mon-projet -- --template react
+
+# 2. Aller dans le dossier
+cd mon-projet
+
+# 3. Installer toutes les dépendances en une fois
+npm install react-bits axios react-router-dom zustand react-hook-form lucide-react clsx sonner @tanstack/react-query
+npm install @tanstack/react-query
+npm install axios react-router-dom zustand sonner
+npm install framer-motion
+npm install antd
+npm install styled-jsx
+
+# 4. Installer Tailwind
+npm install -D tailwindcss postcss autoprefixer
+npx tailwindcss init -p
+npm install tailwindcss @tailwindcss/postcss postcss
+npm install lucide-react
+# 5. Créer .env.local
+echo "VITE_API_URL=http://localhost:8000/api" > .env.local
+
+# 6. Lancer le projet
+npm run dev
