@@ -10,7 +10,7 @@ import axios from 'axios';
 // ============================================
 
 //const API_BASE_URL = 'https://universiteafrica.pythonanywhere.com/api/';
-export const API_BASE_URL = 'http://127.0.0.1:8000/api/';
+export const API_BASE_URL = 'https://univ-production-8f5a.up.railway.app/api/';
 
 // Création d'une instance axios avec configuration par défaut
 const apiClient = axios.create({
