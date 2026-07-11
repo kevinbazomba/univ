@@ -28,7 +28,7 @@ SECRET_KEY = 'django-insecure-&380xn)5%z_crv6((big*fx$_2hdyajrm!z4uwj4kr(@f*)jfw
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '*']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '*' , 'https://univ-production-475f.up.railway.app', 'inverted.sbs']
 
 
 # Application definition
