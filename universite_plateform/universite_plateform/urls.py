@@ -1,5 +1,5 @@
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
 from django.conf import settings
 
 from django.conf.urls.static import static
@@ -33,6 +33,7 @@ urlpatterns = [
     path('api/frais/', include('apps.frais_academique.urls')),
     path('api/', include('apps.enseignements.urls')),
     path('api/', include('apps.jury_access.urls')),
+    re_path(r'^(?!api/|admin/|static/|media/).*$', views.react_app),
 
 ]
 
