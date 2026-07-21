@@ -9,6 +9,7 @@ const destDir = path.resolve(__dirname, '..', '..', 'static', 'assets');
 (async () => {
   try {
     const entries = await fs.readdir(srcDir);
+    await fs.rm(destDir, { recursive: true, force: true });
     await fs.mkdir(destDir, { recursive: true });
 
     const files = entries.filter((f) => f.endsWith('.css') || f.endsWith('.js'));

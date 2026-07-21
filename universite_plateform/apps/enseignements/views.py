@@ -18,7 +18,7 @@ import re
 
 from .models import (
     Grade, Professeur, Cours, 
-    GestionApplicationCours, AppliquerCours, SessionEvaluation, CotationSession, DecisionJury, PromotionEnAttente
+    GestionApplicationCours, AppliquerCours, SessionEvaluation, CotationSession, DecisionJury, PromotionEnAttente, FusionCoursJury
 )
 from .serializers import (
     GradeSerializer, ProfesseurSerializer, ProfesseurLoginSerializer,
@@ -26,10 +26,12 @@ from .serializers import (
     GestionApplicationCoursSerializer, GestionApplicationCoursSimpleSerializer,
     AppliquerCoursSerializer, ChangePasswordSerializer,
     FaculteSerializer, PromotionSerializer, AnneeAcademiqueSerializer,
-    ProfesseurProfileUpdateSerializer, SessionEvaluationSerializer, DecisionJurySerializer
+    ProfesseurProfileUpdateSerializer, SessionEvaluationSerializer, DecisionJurySerializer, FusionCoursJurySerializer,
+    CotationSessionSerializer
 )
 from apps.etudiants.models import Faculte, Departement, Promotion, AnneeAcademique, Etudiant, InscriptionAcademique
 from apps.etudiants.serializers import DepartementSerializer, EtudiantSerializer
+from apps.jury_access.utils import get_jury_token_from_request, filtrer_queryset_par_jeton
 
 
 class IsAdministrativeUser(BasePermission):
@@ -448,6 +450,8 @@ class ProfesseurViewSet(viewsets.ModelViewSet):
         cotation.points_interro = interro
         cotation.points_examen = examen
         cotation.observation = request.data.get('observation', '')
+        cotation.delibere_par_jury = False
+        cotation.date_deliberation_jury = None
         cotation.save()
 
         application.points_tp = tp
@@ -604,10 +608,65 @@ class ProfesseurViewSet(viewsets.ModelViewSet):
 
 
 
+class FusionCoursJuryViewSet(viewsets.ModelViewSet):
+    serializer_class = FusionCoursJurySerializer
+    permission_classes = [IsAdministrativeUser]
+
+    def get_queryset(self):
+        jeton = get_jury_token_from_request(self.request)
+        queryset = FusionCoursJury.objects.select_related(
+            'faculte', 'departement', 'promotion', 'annee_academique', 'cree_par',
+        ).prefetch_related('cours').all()
+        queryset = queryset.filter(annee_academique=jeton.annee_academique)
+        if jeton.faculte_id:
+            queryset = queryset.filter(Q(faculte__isnull=True) | Q(faculte=jeton.faculte))
+        if jeton.departement_id:
+            queryset = queryset.filter(Q(departement__isnull=True) | Q(departement=jeton.departement))
+        if jeton.promotion_id:
+            queryset = queryset.filter(Q(promotion__isnull=True) | Q(promotion=jeton.promotion))
+        for champ in ('faculte', 'departement', 'promotion', 'annee_academique'):
+            valeur = self.request.query_params.get(champ)
+            if valeur:
+                queryset = queryset.filter(**{f'{champ}_id': valeur})
+        actif = self.request.query_params.get('est_active')
+        if actif in ('true', '1', 'True'):
+            queryset = queryset.filter(est_active=True)
+        if actif in ('false', '0', 'False'):
+            queryset = queryset.filter(est_active=False)
+        return queryset
+
+    def perform_create(self, serializer):
+        jeton = get_jury_token_from_request(self.request)
+        champs = {'cree_par': self.request.user}
+        champs['annee_academique'] = jeton.annee_academique
+        if jeton.faculte_id:
+            champs['faculte'] = jeton.faculte
+        if jeton.departement_id:
+            champs['departement'] = jeton.departement
+        if jeton.promotion_id:
+            champs['promotion'] = jeton.promotion
+        serializer.save(**champs)
+
+
 class JuryViewSet(viewsets.ModelViewSet):
     queryset = DecisionJury.objects.select_related('session', 'etudiant', 'approuve_par')
     serializer_class = DecisionJurySerializer
     permission_classes = [IsAdministrativeUser]
+
+    def _jeton_jury(self, request):
+        return get_jury_token_from_request(request)
+
+    def get_queryset(self):
+        jeton = self._jeton_jury(self.request)
+        queryset = DecisionJury.objects.select_related('session', 'etudiant', 'approuve_par')
+        queryset = queryset.filter(session__annee_academique=jeton.annee_academique)
+        if jeton.faculte_id:
+            queryset = queryset.filter(etudiant__inscriptions_academiques__faculte_id=jeton.faculte_id)
+        if jeton.departement_id:
+            queryset = queryset.filter(etudiant__inscriptions_academiques__departement_id=jeton.departement_id)
+        if jeton.promotion_id:
+            queryset = queryset.filter(etudiant__inscriptions_academiques__promotion_id=jeton.promotion_id)
+        return queryset.distinct()
 
     def _promotion_suivante(self, promotion):
         suivante = Promotion.objects.filter(ordre__gt=promotion.ordre).order_by('ordre', 'id').first()
@@ -633,6 +692,69 @@ class JuryViewSet(viewsets.ModelViewSet):
             date_debut__lte=session.date_fin,
             est_cloture=False,
         ).exclude(pk=session.pk)
+
+    def _fusions_pour_etudiant(self, etudiant, session):
+        inscription = InscriptionAcademique.objects.filter(
+            etudiant=etudiant,
+            annee_academique=session.annee_academique,
+        ).first()
+        faculte_id = getattr(inscription, 'faculte_id', None) or etudiant.faculte_id
+        departement_id = getattr(inscription, 'departement_id', None) or etudiant.departement_id
+        promotion_id = getattr(inscription, 'promotion_id', None) or etudiant.promotion_id
+        return FusionCoursJury.objects.filter(est_active=True).filter(
+            Q(annee_academique__isnull=True) | Q(annee_academique=session.annee_academique),
+            Q(faculte__isnull=True) | Q(faculte_id=faculte_id),
+            Q(departement__isnull=True) | Q(departement_id=departement_id),
+            Q(promotion__isnull=True) | Q(promotion_id=promotion_id),
+        ).prefetch_related('cours').order_by('nom_cours_fusionne')
+
+    def _appliquer_fusions_cours(self, resultats, etudiant, session):
+        fusions = self._fusions_pour_etudiant(etudiant, session)
+        if not fusions.exists():
+            return resultats
+        par_cours = {item['cours_id']: item for item in resultats}
+        cours_deja_fusionnes = set()
+        resultats_fusionnes = []
+        for fusion in fusions:
+            cours_ids = list(fusion.cours.values_list('id', flat=True))
+            branches = [
+                par_cours[cours_id]
+                for cours_id in cours_ids
+                if cours_id in par_cours and cours_id not in cours_deja_fusionnes
+            ]
+            if len(branches) < 2:
+                continue
+            total = sum(float(item.get('total') or 0) for item in branches)
+            maximum = sum(float(item.get('maximum') or 0) for item in branches)
+            credit = sum(float(item.get('credit') or 0) for item in branches)
+            ponderation = sum(float(item.get('ponderation') or 0) for item in branches)
+            cours_deja_fusionnes.update(item['cours_id'] for item in branches)
+            resultats_fusionnes.append({
+                'cours_id': f'fusion-{fusion.pk}',
+                'cours_nom': fusion.nom_cours_fusionne,
+                'maximum': maximum,
+                'credit': credit,
+                'ponderation': ponderation,
+                'total': total,
+                'points_tp': None,
+                'points_interro': None,
+                'points_examen': None,
+                'observation': 'Cours fusionne par le jury',
+                'reussi': total >= maximum / 2 if maximum else False,
+                'session_id': session.pk,
+                'session_nom': session.nom,
+                'cotation_id': None,
+                'est_fusion': True,
+                'fusion_id': fusion.pk,
+                'branches': branches,
+            })
+        conserves = [
+            item for item in resultats
+            if item['cours_id'] not in cours_deja_fusionnes
+        ]
+        fusionnes = conserves + resultats_fusionnes
+        fusionnes.sort(key=lambda item: item['cours_nom'])
+        return fusionnes
 
     def _consolidation(self, etudiant, session):
         cotations = CotationSession.objects.filter(
@@ -667,9 +789,85 @@ class JuryViewSet(viewsets.ModelViewSet):
                 'cotation_id': cotation.pk,
             })
         resultats.sort(key=lambda item: item['cours_nom'])
-        return resultats
+        return self._appliquer_fusions_cours(resultats, etudiant, session)
+
+    def _decision_fin_annee(self, pourcentage, echecs_legers, echecs_graves):
+        pourcentage_arrondi = round(float(pourcentage or 0))
+        total_echecs = int(echecs_legers or 0) + int(echecs_graves or 0)
+        if echecs_graves >= 6:
+            return 'A'
+        if total_echecs >= 3:
+            return 'AA'
+        if pourcentage_arrondi < 30:
+            return 'NF'
+        if pourcentage_arrondi >= 80:
+            return 'GD'
+        if pourcentage_arrondi >= 70:
+            return 'D'
+        if pourcentage_arrondi >= 50:
+            return 'S'
+        return 'A'
+
+    def _bilan_fin_annee_etudiant(self, etudiant, session):
+        consolidation = self._consolidation(etudiant, session)
+        applications = AppliquerCours.objects.filter(
+            etudiant=etudiant,
+            est_actif=True,
+            gestion__annee_academique=session.annee_academique,
+        ).select_related('cours')
+        cours_consolides = {
+            branche['cours_id']
+            for note in consolidation
+            for branche in (note.get('branches') or [note])
+            if isinstance(branche.get('cours_id'), int)
+        }
+        cotes_manquantes = applications.exclude(cours_id__in=cours_consolides).count()
+        total_max = sum(float(note.get('maximum') or 0) for note in consolidation)
+        total_pondere = sum(float(note.get('ponderation') or 0) for note in consolidation)
+        if total_pondere <= 0:
+            total_pondere = total_max
+        total_points_ponderes = sum(
+            ((float(note.get('total') or 0) / float(note.get('maximum') or 1)) * float(note.get('ponderation') or note.get('maximum') or 0))
+            for note in consolidation
+            if float(note.get('maximum') or 0) > 0
+        )
+        pourcentage = (total_points_ponderes / total_pondere * 100) if total_pondere else 0
+        echecs_legers = 0
+        echecs_graves = 0
+        for note in consolidation:
+            maximum = float(note.get('maximum') or 0)
+            total = float(note.get('total') or 0)
+            if maximum <= 0 or total >= maximum / 2:
+                continue
+            if total >= (maximum / 2) - 2:
+                echecs_legers += 1
+            else:
+                echecs_graves += 1
+        decision = self._decision_fin_annee(pourcentage, echecs_legers, echecs_graves)
+        return {
+            'etudiant_id': etudiant.id,
+            'matricule': etudiant.matricule,
+            'nom_complet': etudiant.nom_complet,
+            'faculte_nom': etudiant.faculte.nom if etudiant.faculte_id else '',
+            'departement_nom': etudiant.departement.nom if etudiant.departement_id else '',
+            'promotion_nom': etudiant.promotion.nom if etudiant.promotion_id else '',
+            'total_max': round(total_max, 2),
+            'total_pondere': round(total_pondere, 2),
+            'total_points_ponderes': round(total_points_ponderes, 2),
+            'pourcentage': round(pourcentage, 2),
+            'pourcentage_arrondi': round(pourcentage),
+            'echecs_legers': echecs_legers,
+            'echecs_graves': echecs_graves,
+            'cotes_manquantes': cotes_manquantes,
+            'decision': decision,
+            'promouvable': decision in ('S', 'D', 'GD'),
+            'details': consolidation,
+        }
 
     def _etudiants(self, request, session):
+        jeton = self._jeton_jury(request)
+        if session.annee_academique_id != jeton.annee_academique_id:
+            return Etudiant.objects.none()
         annee = session.annee_academique
         queryset = Etudiant.objects.filter(
             est_actif=True,
@@ -677,15 +875,21 @@ class JuryViewSet(viewsets.ModelViewSet):
             inscriptions_academiques__date_inscription__gte=annee.date_debut,
             inscriptions_academiques__date_inscription__lte=annee.date_fin,
         ).select_related('faculte', 'departement', 'promotion').distinct()
+        queryset = filtrer_queryset_par_jeton(queryset, jeton, prefix='inscriptions_academiques__')
+        data = getattr(request, 'data', {}) or {}
+        query_params = getattr(request, 'query_params', {}) or {}
         for champ in ('faculte', 'departement', 'promotion'):
-            valeur = request.data.get(champ) or request.query_params.get(champ)
+            valeur = data.get(champ) or query_params.get(champ)
             if valeur:
                 queryset = queryset.filter(**{f'inscriptions_academiques__{champ}_id': valeur})
         return queryset
 
     @action(detail=False, methods=['get'])
     def contexte(self, request):
-        sessions = SessionEvaluation.objects.select_related('annee_academique').all()
+        jeton = self._jeton_jury(request)
+        sessions = SessionEvaluation.objects.select_related('annee_academique').filter(
+            annee_academique=jeton.annee_academique,
+        )
         etudiants = []
         if request.query_params.get('session'):
             try:
@@ -705,17 +909,17 @@ class JuryViewSet(viewsets.ModelViewSet):
             except SessionEvaluation.DoesNotExist:
                 pass
         return Response({
-            'annees': AnneeAcademiqueSerializer(AnneeAcademique.objects.all(), many=True).data,
+            'annees': AnneeAcademiqueSerializer(AnneeAcademique.objects.filter(pk=jeton.annee_academique_id), many=True).data,
             'sessions': SessionEvaluationSerializer(sessions, many=True).data,
-            'facultes': list(Faculte.objects.values('id', 'nom')),
-            'departements': list(Departement.objects.filter(est_actif=True).values('id', 'nom', 'faculte_id')),
-            'promotions': list(Promotion.objects.values('id', 'nom')),
-            'promotions_en_attente': list(PromotionEnAttente.objects.filter(
+            'facultes': list((Faculte.objects.filter(pk=jeton.faculte_id) if jeton.faculte_id else Faculte.objects.all()).values('id', 'nom')),
+            'departements': list((Departement.objects.filter(pk=jeton.departement_id) if jeton.departement_id else Departement.objects.filter(est_actif=True, **({'faculte_id': jeton.faculte_id} if jeton.faculte_id else {}))).values('id', 'nom', 'faculte_id')),
+            'promotions': list((Promotion.objects.filter(pk=jeton.promotion_id) if jeton.promotion_id else Promotion.objects.all()).values('id', 'nom')),
+            'promotions_en_attente': list(filtrer_queryset_par_jeton(PromotionEnAttente.objects.filter(
                 statut__in=['EN_ATTENTE', 'BLOQUE'],
             ).select_related(
                 'inscription_origine__etudiant', 'inscription_origine__promotion',
                 'inscription_origine__annee_academique', 'promotion_cible', 'annee_cible',
-            ).values(
+            ), jeton, prefix='inscription_origine__').values(
                 'id', 'statut', 'message', 'inscription_origine__etudiant__matricule',
                 'inscription_origine__etudiant__nom', 'inscription_origine__etudiant__prenom',
                 'inscription_origine__promotion__nom', 'inscription_origine__annee_academique__nom',
@@ -723,6 +927,237 @@ class JuryViewSet(viewsets.ModelViewSet):
             )),
             'etudiants': etudiants,
         })
+
+    @action(detail=False, methods=['get'])
+    def cotes(self, request):
+        jeton = self._jeton_jury(request)
+        session_id = request.query_params.get('session')
+        session = SessionEvaluation.objects.filter(
+            pk=session_id,
+            annee_academique=jeton.annee_academique,
+        ).first() if session_id else SessionEvaluation.objects.filter(
+            annee_academique=jeton.annee_academique,
+            est_active=True,
+        ).order_by('-date_debut').first()
+        if not session:
+            return Response({'session': ['Session invalide.']}, status=status.HTTP_400_BAD_REQUEST)
+
+        etudiants = self._etudiants(request, session)
+        queryset = AppliquerCours.objects.filter(
+            etudiant__in=etudiants,
+            est_actif=True,
+            gestion__annee_academique=session.annee_academique,
+        ).select_related('etudiant', 'cours', 'gestion').order_by(
+            'etudiant__nom', 'etudiant__prenom', 'cours__nom_cours',
+        )
+        recherche = request.query_params.get('search')
+        if recherche:
+            queryset = queryset.filter(
+                Q(etudiant__matricule__icontains=recherche)
+                | Q(etudiant__nom__icontains=recherche)
+                | Q(etudiant__post_nom__icontains=recherche)
+                | Q(etudiant__prenom__icontains=recherche)
+                | Q(cours__nom_cours__icontains=recherche)
+            )
+        cours_disponibles = list(
+            queryset.values('cours_id', 'cours__nom_cours')
+            .distinct()
+            .order_by('cours__nom_cours')
+        )
+        if request.query_params.get('cours'):
+            queryset = queryset.filter(cours_id=request.query_params['cours'])
+
+        cotations = {
+            cotation.application_id: cotation
+            for cotation in CotationSession.objects.filter(
+                application__in=queryset,
+                session=session,
+            )
+        }
+        donnees = []
+        for application in queryset:
+            cotation = cotations.get(application.id)
+            donnees.append({
+                'application_id': application.id,
+                'etudiant_id': application.etudiant_id,
+                'matricule': application.etudiant.matricule,
+                'nom_complet': application.etudiant.nom_complet,
+                'cours_id': application.cours_id,
+                'cours_nom': application.cours.nom_cours,
+                'cours_points': application.cours.points,
+                'session_id': session.id,
+                'session_nom': session.nom,
+                'points_tp': float(cotation.points_tp) if cotation and cotation.points_tp is not None else None,
+                'points_interro': float(cotation.points_interro) if cotation and cotation.points_interro is not None else None,
+                'points_examen': float(cotation.points_examen) if cotation and cotation.points_examen is not None else None,
+                'total': float(cotation.total) if cotation else None,
+                'observation': cotation.observation if cotation else '',
+                'delibere_par_jury': bool(cotation.delibere_par_jury) if cotation else False,
+                'date_evaluation': cotation.date_evaluation if cotation else None,
+            })
+        return Response({
+            'session': SessionEvaluationSerializer(session).data,
+            'cours': [
+                {'id': item['cours_id'], 'nom_cours': item['cours__nom_cours']}
+                for item in cours_disponibles
+            ],
+            'cotes': donnees,
+        })
+
+    @action(detail=False, methods=['get'], url_path='resultats-fin-annee')
+    def resultats_fin_annee(self, request):
+        jeton = self._jeton_jury(request)
+        session = SessionEvaluation.objects.filter(
+            pk=request.query_params.get('session'),
+            annee_academique=jeton.annee_academique,
+            est_cloture=True,
+            est_fin_annee=True,
+        ).first()
+        if not session:
+            return Response({'session': ["Sélectionnez une clôture cochée fin d'année."]}, status=status.HTTP_400_BAD_REQUEST)
+        etudiants = self._etudiants(request, session).exclude(
+            decisions_jury__decision__in=['S', 'D', 'GD'],
+        ).distinct()
+        resultats = [self._bilan_fin_annee_etudiant(etudiant, session) for etudiant in etudiants]
+        return Response({'session': SessionEvaluationSerializer(session).data, 'resultats': resultats})
+
+    @action(detail=False, methods=['post'], url_path='appliquer-resultats-fin-annee')
+    def appliquer_resultats_fin_annee(self, request):
+        jeton = self._jeton_jury(request)
+        session = SessionEvaluation.objects.filter(
+            pk=request.data.get('session_id'),
+            annee_academique=jeton.annee_academique,
+            est_cloture=True,
+            est_fin_annee=True,
+        ).first()
+        if not session:
+            return Response({'session_id': ["Sélectionnez une clôture cochée fin d'année."]}, status=status.HTTP_400_BAD_REQUEST)
+        if not session.annee_academique.est_active:
+            return Response({'error': 'Cette année académique est clôturée : consultation uniquement.'}, status=status.HTTP_403_FORBIDDEN)
+
+        etudiants = self._etudiants(request, session).exclude(
+            decisions_jury__decision__in=['S', 'D', 'GD'],
+        ).distinct()
+        appliques = 0
+        promouvables = 0
+        with transaction.atomic():
+            for etudiant in etudiants:
+                bilan = self._bilan_fin_annee_etudiant(etudiant, session)
+                decision_jury, _ = DecisionJury.objects.update_or_create(
+                    session=session,
+                    etudiant=etudiant,
+                    defaults={
+                        'decision': bilan['decision'],
+                        'resultats_publies': True,
+                        'mode_approbation': 'COLLECTIF',
+                        'approuve_par': request.user,
+                        'date_approbation': timezone.now(),
+                        'observation': (
+                            f"Pourcentage: {bilan['pourcentage_arrondi']}% | "
+                            f"EL: {bilan['echecs_legers']} | EG: {bilan['echecs_graves']} | "
+                            f"ND: {bilan['cotes_manquantes']}"
+                        ),
+                    },
+                )
+                inscription = InscriptionAcademique.objects.filter(
+                    etudiant=etudiant,
+                    annee_academique=session.annee_academique,
+                ).first()
+                if inscription:
+                    inscription.statut = 'ADMIS' if bilan['promouvable'] else 'AJOURNE'
+                    inscription.save(update_fields=['statut', 'date_modification'])
+                    if bilan['promouvable']:
+                        promotion_suivante = self._promotion_suivante(inscription.promotion)
+                        PromotionEnAttente.objects.update_or_create(
+                            inscription_origine=inscription,
+                            defaults={
+                                'decision': decision_jury,
+                                'inscription_origine': inscription,
+                                'promotion_cible': promotion_suivante,
+                                'annee_cible': None,
+                                'statut': 'EN_ATTENTE' if promotion_suivante else 'BLOQUE',
+                                'message': '' if promotion_suivante else 'Aucun niveau supérieur configuré.',
+                            },
+                        )
+                        promouvables += 1
+                    else:
+                        PromotionEnAttente.objects.filter(inscription_origine=inscription).delete()
+                appliques += 1
+        return Response({'message': f'{appliques} décision(s) appliquée(s), {promouvables} promouvable(s).'})
+
+    @action(detail=False, methods=['post'], url_path='modifier-cote')
+    def modifier_cote(self, request):
+        try:
+            session = SessionEvaluation.objects.get(pk=request.data.get('session_id'), est_active=True)
+        except SessionEvaluation.DoesNotExist:
+            return Response({'session_id': ['Session active invalide.']}, status=status.HTTP_400_BAD_REQUEST)
+        if not session.annee_academique.est_active:
+            return Response({'error': 'Cette annÃ©e acadÃ©mique est clÃ´turÃ©e : consultation uniquement.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            application = AppliquerCours.objects.select_related('cours', 'etudiant', 'gestion').get(
+                pk=request.data.get('application_id'),
+                gestion__annee_academique=session.annee_academique,
+            )
+        except AppliquerCours.DoesNotExist:
+            return Response({'application_id': ['Application de cours introuvable.']}, status=status.HTTP_404_NOT_FOUND)
+
+        if not self._etudiants(request, session).filter(pk=application.etudiant_id).exists():
+            return Response({'error': 'Cette application est hors pÃ©rimÃ¨tre du jeton.'}, status=status.HTTP_403_FORBIDDEN)
+
+        def valeur_optionnelle(nom):
+            valeur = request.data.get(nom)
+            if valeur in (None, ''):
+                return None
+            try:
+                return Decimal(str(valeur))
+            except (InvalidOperation, TypeError):
+                raise ValueError(nom)
+
+        try:
+            tp = valeur_optionnelle('points_tp')
+            interro = valeur_optionnelle('points_interro')
+            examen = valeur_optionnelle('points_examen')
+        except ValueError as erreur:
+            return Response({str(erreur): ['Valeur invalide.']}, status=status.HTTP_400_BAD_REQUEST)
+
+        if tp is not None and not 0 <= tp <= 5:
+            return Response({'points_tp': ['Le TP doit Ãªtre compris entre 0 et 5.']}, status=status.HTTP_400_BAD_REQUEST)
+        if interro is not None and not 0 <= interro <= 5:
+            return Response({'points_interro': ["L'interrogation doit Ãªtre comprise entre 0 et 5."]}, status=status.HTTP_400_BAD_REQUEST)
+
+        maximum_examen = Decimal(str(application.cours.points))
+        if tp is not None:
+            maximum_examen -= Decimal('5')
+        if interro is not None:
+            maximum_examen -= Decimal('5')
+        maximum_examen = max(maximum_examen, Decimal('0'))
+        if examen is not None and not 0 <= examen <= maximum_examen:
+            return Response({'points_examen': [f"L'examen doit Ãªtre compris entre 0 et {maximum_examen}."]}, status=status.HTTP_400_BAD_REQUEST)
+        if tp is None and interro is None and examen is None:
+            return Response({'error': 'Saisissez au moins une cote.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        total = sum((note for note in (tp, interro, examen) if note is not None), Decimal('0'))
+        cotation, _ = CotationSession.objects.get_or_create(application=application, session=session)
+        cotation.points_tp = tp
+        cotation.points_interro = interro
+        cotation.points_examen = examen
+        cotation.observation = request.data.get('observation', '')
+        cotation.delibere_par_jury = True
+        cotation.date_deliberation_jury = timezone.now()
+        cotation.save()
+
+        application.points_tp = tp
+        application.points_interro = interro
+        application.points_examen = examen
+        application.points_obtenus = total
+        application.observation = cotation.observation
+        application.date_evaluation = timezone.now()
+        application.save(update_fields=[
+            'points_tp', 'points_interro', 'points_examen',
+            'points_obtenus', 'observation', 'date_evaluation',
+        ])
+        return Response({'message': 'Cote modifiÃ©e.', 'cotation': CotationSessionSerializer(cotation).data})
 
     @action(detail=False, methods=['post'])
     def publier(self, request):
@@ -775,8 +1210,9 @@ class JuryViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='creer-cloture')
     def creer_cloture(self, request):
+        jeton = self._jeton_jury(request)
         try:
-            annee = AnneeAcademique.objects.get(pk=request.data.get('annee_academique_id'), est_active=True)
+            annee = AnneeAcademique.objects.get(pk=jeton.annee_academique_id, est_active=True)
         except AnneeAcademique.DoesNotExist:
             return Response({'annee_academique_id': ['Année active invalide.']}, status=status.HTTP_400_BAD_REQUEST)
         nom = str(request.data.get('nom') or '').strip()
@@ -786,7 +1222,8 @@ class JuryViewSet(viewsets.ModelViewSet):
             nom=nom, annee_academique=annee,
             date_debut=request.data.get('date_debut') or timezone.localdate(),
             date_fin=request.data.get('date_fin') or timezone.localdate(),
-            description=request.data.get('description', ''), est_active=True, est_cloture=True,
+            description=request.data.get('description', ''), est_active=True,
+            est_cloture=True, est_fin_annee=bool(request.data.get('est_fin_annee')),
         )
         sources = SessionEvaluation.objects.filter(
             pk__in=request.data.get('session_ids') or [], annee_academique=annee, est_cloture=False,
@@ -797,10 +1234,15 @@ class JuryViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def promouvoir(self, request):
-        queryset = PromotionEnAttente.objects.filter(statut__in=['EN_ATTENTE', 'BLOQUE']).select_related(
+        jeton = self._jeton_jury(request)
+        queryset = PromotionEnAttente.objects.filter(
+            statut__in=['EN_ATTENTE', 'BLOQUE'],
+            decision__decision__in=['S', 'D', 'GD'],
+        ).select_related(
             'inscription_origine__etudiant', 'inscription_origine__faculte',
             'inscription_origine__departement', 'promotion_cible',
         )
+        queryset = filtrer_queryset_par_jeton(queryset, jeton, prefix='inscription_origine__')
         ids = request.data.get('promotion_ids') or []
         if ids:
             queryset = queryset.filter(pk__in=ids)

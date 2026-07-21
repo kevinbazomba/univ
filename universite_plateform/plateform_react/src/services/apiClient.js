@@ -9,8 +9,10 @@ import axios from 'axios';
 // CONFIGURATION DE BASE
 // ============================================
 
+
 //const API_BASE_URL = 'https://universiteafrica.pythonanywhere.com/api/';
-export const API_BASE_URL = 'https://univ-production-8f5a.up.railway.app/api/';
+export const API_BASE_URL = 'http://127.0.0.1:8000/api/';
+//export const API_BASE_URL = 'https://univ-production-8f5a.up.railway.app/api/';
 
 // Création d'une instance axios avec configuration par défaut
 const apiClient = axios.create({
@@ -34,6 +36,10 @@ apiClient.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    const juryToken = sessionStorage.getItem('jury_access_token');
+    if (juryToken) {
+      config.headers['X-Jury-Token'] = juryToken;
+    }
     return config;
   },
   (error) => Promise.reject(error)
@@ -49,6 +55,20 @@ apiClient.interceptors.response.use(
     const originalRequest = error.config;
     const url = originalRequest?.url || '';
     const isAuthRoute = url.includes('/auth/') || url.startsWith('auth/');
+    const isJuryRoute = url.includes('jury') || url.includes('fusions-cours');
+    const juryErrorMessage = String(
+      error.response?.data?.detail || error.response?.data?.error || ''
+    ).toLowerCase();
+
+    if (
+      error.response?.status === 403 &&
+      isJuryRoute &&
+      juryErrorMessage.includes('jeton')
+    ) {
+      sessionStorage.removeItem('jury_access_token');
+      sessionStorage.removeItem('jury_access_scope');
+      window.dispatchEvent(new Event('jury-token-invalid'));
+    }
 
     // Ne pas tenter de rafraîchir le token pour les routes d'authentification
     if (error.response?.status === 401 && !originalRequest._retry && !isAuthRoute) {

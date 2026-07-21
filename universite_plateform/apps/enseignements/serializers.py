@@ -5,7 +5,7 @@ from .models import (
     Professeur, 
     Cours, 
     GestionApplicationCours, 
-    AppliquerCours, SessionEvaluation, CotationSession, DecisionJury
+    AppliquerCours, SessionEvaluation, CotationSession, DecisionJury, FusionCoursJury
 )
 from apps.etudiants.models import Faculte, Etudiant, Promotion, AnneeAcademique, InscriptionAcademique
 
@@ -98,6 +98,37 @@ class CoursSerializer(serializers.ModelSerializer):
         read_only_fields = ['code_cours', 'date_creation']
 
 
+class FusionCoursJurySerializer(serializers.ModelSerializer):
+    cours_details = serializers.SerializerMethodField()
+    faculte_nom = serializers.CharField(source='faculte.nom', read_only=True, allow_null=True)
+    departement_nom = serializers.CharField(source='departement.nom', read_only=True, allow_null=True)
+    promotion_nom = serializers.CharField(source='promotion.nom', read_only=True, allow_null=True)
+    annee_academique_nom = serializers.CharField(source='annee_academique.nom', read_only=True, allow_null=True)
+    cree_par_nom = serializers.CharField(source='cree_par.username', read_only=True, allow_null=True)
+
+    class Meta:
+        model = FusionCoursJury
+        fields = [
+            'id', 'nom_cours_fusionne', 'cours', 'cours_details',
+            'faculte', 'faculte_nom', 'departement', 'departement_nom',
+            'promotion', 'promotion_nom', 'annee_academique',
+            'annee_academique_nom', 'est_active', 'cree_par_nom',
+            'date_creation',
+        ]
+        read_only_fields = ['date_creation', 'cree_par_nom']
+
+    def get_cours_details(self, obj):
+        return [
+            {'id': cours.id, 'code_cours': cours.code_cours, 'nom_cours': cours.nom_cours}
+            for cours in obj.cours.all().order_by('nom_cours')
+        ]
+
+    def validate_cours(self, value):
+        if len(value) < 2:
+            raise serializers.ValidationError('Selectionnez au moins deux branches/cours a fusionner.')
+        return value
+
+
 class SessionEvaluationSerializer(serializers.ModelSerializer):
     annee_academique_nom = serializers.CharField(source='annee_academique.nom', read_only=True)
     annee_academique_est_active = serializers.BooleanField(source='annee_academique.est_active', read_only=True)
@@ -108,7 +139,8 @@ class SessionEvaluationSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'nom', 'annee_academique', 'annee_academique_nom', 'annee_academique_est_active',
             'date_debut', 'date_fin', 'description', 'est_active',
-            'est_rattrapage', 'est_cloture', 'session_origine', 'session_origine_nom', 'sessions_incluses',
+            'est_rattrapage', 'est_cloture', 'est_fin_annee',
+            'session_origine', 'session_origine_nom', 'sessions_incluses',
         ]
 
 
@@ -117,7 +149,11 @@ class CotationSessionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CotationSession
-        fields = ['id', 'session', 'session_nom', 'points_tp', 'points_interro', 'points_examen', 'total', 'observation', 'date_evaluation']
+        fields = [
+            'id', 'session', 'session_nom', 'points_tp', 'points_interro',
+            'points_examen', 'total', 'observation', 'delibere_par_jury',
+            'date_deliberation_jury', 'date_evaluation'
+        ]
 
 class DecisionJurySerializer(serializers.ModelSerializer):
     etudiant_nom = serializers.CharField(source='etudiant.nom_complet', read_only=True)

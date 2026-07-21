@@ -5,6 +5,7 @@ from django.db.models import Count, Q
 from .models import (
     Grade, Professeur, Cours, GestionApplicationCours, AppliquerCours,
     SessionEvaluation, CotationSession, DecisionJury, PromotionEnAttente,
+    FusionCoursJury,
 )
 
 
@@ -106,6 +107,20 @@ class PromotionEnAttenteAdmin(admin.ModelAdmin):
     list_filter = ('statut', 'annee_cible', 'promotion_cible')
     search_fields = ('inscription_origine__etudiant__matricule', 'inscription_origine__etudiant__nom')
     readonly_fields = ('decision', 'inscription_origine', 'inscription_creee', 'date_creation', 'date_traitement')
+
+
+@admin.register(FusionCoursJury)
+class FusionCoursJuryAdmin(admin.ModelAdmin):
+    list_display = ('nom_cours_fusionne', 'faculte', 'departement', 'promotion', 'annee_academique', 'est_active', 'date_creation')
+    list_filter = ('est_active', 'faculte', 'departement', 'promotion', 'annee_academique')
+    search_fields = ('nom_cours_fusionne', 'cours__nom_cours', 'cours__code_cours')
+    filter_horizontal = ('cours',)
+    readonly_fields = ('cree_par', 'date_creation')
+
+    def save_model(self, request, obj, form, change):
+        if not obj.cree_par_id:
+            obj.cree_par = request.user
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(Grade)

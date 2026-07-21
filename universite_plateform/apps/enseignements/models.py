@@ -155,6 +155,33 @@ class Cours(models.Model):
         return self.nom_cours
 
 
+class FusionCoursJury(models.Model):
+    """Regle decidee par le jury pour regrouper plusieurs branches en un seul cours."""
+
+    nom_cours_fusionne = models.CharField(max_length=200)
+    cours = models.ManyToManyField('Cours', related_name='fusions_jury')
+    faculte = models.ForeignKey('etudiants.Faculte', on_delete=models.SET_NULL, null=True, blank=True)
+    departement = models.ForeignKey('etudiants.Departement', on_delete=models.SET_NULL, null=True, blank=True)
+    promotion = models.ForeignKey('etudiants.Promotion', on_delete=models.SET_NULL, null=True, blank=True)
+    annee_academique = models.ForeignKey('etudiants.AnneeAcademique', on_delete=models.SET_NULL, null=True, blank=True)
+    est_active = models.BooleanField(default=True)
+    cree_par = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='fusions_cours_jury')
+    date_creation = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['nom_cours_fusionne']
+        verbose_name = "Fusion de cours du jury"
+        verbose_name_plural = "Fusions de cours du jury"
+
+    def __str__(self):
+        return self.nom_cours_fusionne
+
+    def clean(self):
+        super().clean()
+        if self.pk and self.cours.count() < 2:
+            raise ValidationError({'cours': 'Selectionnez au moins deux branches/cours a fusionner.'})
+
+
 
 
 
@@ -266,6 +293,7 @@ class SessionEvaluation(models.Model):
         verbose_name='Session de rattrapage',
     )
     est_cloture = models.BooleanField(default=False, verbose_name='Session de clôture du jury')
+    est_fin_annee = models.BooleanField(default=False, verbose_name="Clôture de fin d'année")
     session_origine = models.ForeignKey(
         'self',
         on_delete=models.PROTECT,
@@ -299,6 +327,8 @@ class SessionEvaluation(models.Model):
             raise ValidationError({'session_origine': "Une session ordinaire ne doit pas avoir de session d'origine."})
         if self.est_cloture and self.est_rattrapage:
             raise ValidationError({'est_cloture': 'Une session de clôture ne peut pas être une session de rattrapage.'})
+        if self.est_fin_annee and not self.est_cloture:
+            raise ValidationError({'est_fin_annee': "La fin d'année doit être une session de clôture."})
         if self.session_origine_id:
             if self.pk and self.session_origine_id == self.pk:
                 raise ValidationError({'session_origine': 'Une session ne peut pas se remplacer elle-même.'})
@@ -328,6 +358,8 @@ class CotationSession(models.Model):
     points_examen = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     total = models.DecimalField(max_digits=6, decimal_places=2, default=0, editable=False)
     observation = models.CharField(max_length=255, blank=True)
+    delibere_par_jury = models.BooleanField(default=False)
+    date_deliberation_jury = models.DateTimeField(null=True, blank=True)
     date_evaluation = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -348,7 +380,11 @@ class CotationSession(models.Model):
 
 
 class DecisionJury(models.Model):
-    DECISIONS = [('EN_ATTENTE', 'En attente'), ('ADMIS', 'Admis'), ('AJOURNE', 'Ajourné'), ('NON_ADMIS', 'Non admis')]
+    DECISIONS = [
+        ('EN_ATTENTE', 'En attente'), ('ADMIS', 'Admis'), ('AJOURNE', 'Ajourné'), ('NON_ADMIS', 'Non admis'),
+        ('S', 'Satisfait'), ('D', 'Distinction'), ('GD', 'Grande distinction'),
+        ('AA', 'Assimilé ajourné'), ('A', 'Ajourné'), ('NF', 'Naf'),
+    ]
     MODES = [('INDIVIDUEL', 'Individuel'), ('COLLECTIF', 'Collectif')]
     session = models.ForeignKey(SessionEvaluation, on_delete=models.CASCADE, related_name='decisions_jury')
     etudiant = models.ForeignKey('etudiants.Etudiant', on_delete=models.CASCADE, related_name='decisions_jury')

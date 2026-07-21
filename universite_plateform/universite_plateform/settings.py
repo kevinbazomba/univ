@@ -46,7 +46,8 @@ INSTALLED_APPS = [
     'apps.accounts', 
     'apps.etudiants',
     'apps.frais_academique',
-    'apps.enseignements'
+    'apps.enseignements',
+    'apps.jury_access',
 ]
 
 
@@ -189,6 +190,7 @@ CORS_ALLOW_HEADERS = [
     'origin',
     'user-agent',
     'x-csrftoken',
+    'x-jury-token',
     'x-requested-with',
 ]
 

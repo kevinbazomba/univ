@@ -15,10 +15,12 @@ import {
   Users,
   X,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { toast, Toaster } from "sonner";
 import { api } from "../../../services/apiClient";
 
-const JuryEtudiants = () => {
+const JuryEtudiants = ({ resultatsConsolides = false }) => {
+  const navigate = useNavigate();
   const [sessions, setSessions] = useState([]);
   const [annees, setAnnees] = useState([]);
   const [referentiels, setReferentiels] = useState({
@@ -41,7 +43,6 @@ const JuryEtudiants = () => {
   const [actionEnCours, setActionEnCours] = useState(false);
   const [promotionsEnAttente, setPromotionsEnAttente] = useState([]);
   const [afficherCloture, setAfficherCloture] = useState(false);
-  const [afficherConsolides, setAfficherConsolides] = useState(false);
   const [afficherPromotion, setAfficherPromotion] = useState(false);
   const [anneeCible, setAnneeCible] = useState("");
   const [filtreConsolide, setFiltreConsolide] = useState("TOUS");
@@ -51,6 +52,7 @@ const JuryEtudiants = () => {
     date_debut: "",
     date_fin: "",
     session_ids: [],
+    est_fin_annee: false,
   });
 
   async function charger() {
@@ -100,7 +102,8 @@ const JuryEtudiants = () => {
             session: String(sessionParDefaut.id),
           }));
       }
-    } catch {
+    } catch (error) {
+      console.error(error);
       toast.error("Impossible de charger les données du jury");
     } finally {
       setLoading(false);
@@ -126,6 +129,20 @@ const JuryEtudiants = () => {
       ),
     [etudiants, filters.search],
   );
+  const etudiantsConsolides = useMemo(
+    () =>
+      visibles.filter(
+        (etudiant) =>
+          filtreConsolide === "TOUS" ||
+          (filtreConsolide === "REUSSI" &&
+            etudiant.consolidation?.length > 0 &&
+            etudiant.cours_echoues === 0) ||
+          (filtreConsolide === "ECHEC" && etudiant.cours_echoues > 0) ||
+          (filtreConsolide === "SANS_NOTE" &&
+            !etudiant.consolidation?.length),
+      ),
+    [visibles, filtreConsolide],
+  );
   const options = (champ) => {
     const cle = `${champ}s`;
     const valeurs = referentiels[cle] || [];
@@ -150,6 +167,7 @@ const JuryEtudiants = () => {
   const sessionCourante = sessions.find(
     (session) => String(session.id) === String(filters.session),
   );
+  const afficherAncienOverlayConsolides = false;
   const anneeModifiable = Boolean(
     sessions.find((session) => String(session.id) === String(filters.session))
       ?.annee_academique_est_active,
@@ -224,7 +242,7 @@ const JuryEtudiants = () => {
       });
       toast.success("Session de clôture créée");
       setAfficherCloture(false);
-      setCloture({ nom: "", date_debut: "", date_fin: "", session_ids: [] });
+      setCloture({ nom: "", date_debut: "", date_fin: "", session_ids: [], est_fin_annee: false });
       setFilters((courants) => ({
         ...courants,
         session: String(response.data.id),
@@ -267,6 +285,309 @@ const JuryEtudiants = () => {
   
   }
 
+  if (resultatsConsolides) {
+    return (
+      <main className="min-h-screen bg-slate-50/80 px-4 py-8 sm:px-6 lg:px-8">
+        <Toaster richColors position="top-right" />
+        <div className="mx-auto max-w-[1500px]">
+          <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-violet-950 via-indigo-950 to-slate-950 p-8 text-white shadow-xl">
+            <div className="absolute -right-16 -top-20 h-64 w-64 rounded-full bg-violet-400/20 blur-3xl" />
+            <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-center gap-4">
+                <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/15">
+                  <Award className="h-8 w-8" />
+                </div>
+                <div>
+                  <p className="text-sm text-violet-200">Jury des étudiants</p>
+                  <h1 className="text-3xl font-black">
+                    Résultats consolidés
+                  </h1>
+                  <p className="mt-1 max-w-2xl text-sm text-violet-100/75">
+                    Consultez les meilleures cotes retenues par cours, les
+                    crédits validés et les échecs éventuels pour la session
+                    clôturée.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => navigate("/jury")}
+                className="w-fit rounded-xl bg-white/10 px-4 py-2.5 text-sm font-bold text-white ring-1 ring-white/15 transition hover:bg-white/15"
+              >
+                Retour au jury
+              </button>
+            </div>
+          </section>
+
+          <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+              <label className="block xl:col-span-1">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Année
+                </span>
+                <select
+                  value={anneeSelectionnee}
+                  onChange={(e) => changerAnnee(e.target.value)}
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                >
+                  {annees.map((annee) => (
+                    <option key={annee.id} value={annee.id}>
+                      {annee.nom}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block xl:col-span-1">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Session
+                </span>
+                <select
+                  value={filters.session}
+                  onChange={(e) =>
+                    setFilters((courants) => ({
+                      ...courants,
+                      session: e.target.value,
+                    }))
+                  }
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                >
+                  <option value="">Toutes</option>
+                  {sessionsAnnee.map((session) => (
+                    <option key={session.id} value={session.id}>
+                      {session.nom}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {["faculte", "departement", "promotion"].map((champ) => (
+                <label key={champ} className="block xl:col-span-1">
+                  <span className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                    {champ}
+                  </span>
+                  <select
+                    value={filters[champ]}
+                    onChange={(e) =>
+                      setFilters((courants) => ({
+                        ...courants,
+                        [champ]: e.target.value,
+                        ...(champ === "faculte" ? { departement: "" } : {}),
+                      }))
+                    }
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm capitalize"
+                  >
+                    <option value="">Tous</option>
+                    {options(champ).map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.nom}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+
+              <label className="block xl:col-span-1">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Résultat
+                </span>
+                <select
+                  value={filtreConsolide}
+                  onChange={(e) => setFiltreConsolide(e.target.value)}
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                >
+                  <option value="TOUS">Tous</option>
+                  <option value="REUSSI">Tous réussis</option>
+                  <option value="ECHEC">Avec échecs</option>
+                  <option value="SANS_NOTE">Sans note</option>
+                </select>
+              </label>
+            </div>
+
+            <label className="mt-4 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <Search className="h-4 w-4 text-slate-400" />
+              <input
+                value={filters.search}
+                onChange={(e) =>
+                  setFilters((courants) => ({
+                    ...courants,
+                    search: e.target.value,
+                  }))
+                }
+                placeholder="Rechercher par matricule ou nom complet..."
+                className="w-full bg-transparent text-sm outline-none"
+              />
+            </label>
+          </section>
+
+          <section className="mt-6">
+            {loading ? (
+              <div className="rounded-3xl border border-slate-200 bg-white p-10 text-center text-sm font-bold text-slate-500 shadow-sm">
+                Chargement des résultats consolidés...
+              </div>
+            ) : etudiantsConsolides.length ? (
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {etudiantsConsolides.map((etudiant) => {
+                  const credits =
+                    etudiant.consolidation
+                      ?.filter((note) => note.reussi)
+                      .reduce(
+                        (total, note) => total + Number(note.credit || 0),
+                        0,
+                      ) || 0;
+                  return (
+                    <article
+                      key={etudiant.id}
+                      className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-lg font-black text-slate-900">
+                            {etudiant.nom_complet}
+                          </p>
+                          <p className="mt-1 text-xs font-semibold text-slate-500">
+                            {etudiant.matricule} · {etudiant.promotion_nom}
+                          </p>
+                        </div>
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-black ${etudiant.cours_echoues > 0 ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}
+                        >
+                          {etudiant.cours_echoues > 0 ? "À revoir" : "Validé"}
+                        </span>
+                      </div>
+
+                      <div className="mt-5 grid grid-cols-3 gap-2 text-center">
+                        <div className="rounded-2xl bg-emerald-50 p-3">
+                          <b className="block text-xl text-emerald-700">
+                            {etudiant.cours_reussis}
+                          </b>
+                          <span className="text-[11px] font-bold text-emerald-600">
+                            Réussis
+                          </span>
+                        </div>
+                        <div className="rounded-2xl bg-rose-50 p-3">
+                          <b className="block text-xl text-rose-700">
+                            {etudiant.cours_echoues}
+                          </b>
+                          <span className="text-[11px] font-bold text-rose-600">
+                            Échoués
+                          </span>
+                        </div>
+                        <div className="rounded-2xl bg-indigo-50 p-3">
+                          <b className="block text-xl text-indigo-700">
+                            {credits}
+                          </b>
+                          <span className="text-[11px] font-bold text-indigo-600">
+                            Crédits
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => setRapport(etudiant)}
+                        className="mt-5 w-full rounded-xl bg-slate-900 px-3 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800"
+                      >
+                        Voir tous les détails
+                      </button>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">
+                Aucun résultat consolidé ne correspond aux filtres choisis.
+              </div>
+            )}
+          </section>
+
+          {rapport && (
+            <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+              <div className="max-h-[90vh] w-full max-w-6xl overflow-auto rounded-3xl bg-white p-6 shadow-2xl">
+                <div className="mb-5 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xl font-black text-slate-900">
+                      Relevé consolidé · {rapport.nom_complet}
+                    </h3>
+                    <p className="text-sm text-slate-500">
+                      Une ligne par cours avec composantes, crédits, meilleure
+                      tentative et session source.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setRapport(null)}
+                    className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="overflow-x-auto rounded-xl border">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        {[
+                          "Cours",
+                          "TP",
+                          "Interro",
+                          "Examen",
+                          "Total",
+                          "Maximum",
+                          "Crédits",
+                          "Pondération",
+                          "Session retenue",
+                          "Résultat",
+                        ].map((titre) => (
+                          <th
+                            key={titre}
+                            className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase text-slate-500"
+                          >
+                            {titre}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {rapport.consolidation?.map((note) => (
+                        <tr key={note.cours_id}>
+                          <td className="px-4 py-3 font-bold">
+                            {note.cours_nom}
+                          </td>
+                          <td className="px-4 py-3">
+                            {note.points_tp ?? "—"}
+                          </td>
+                          <td className="px-4 py-3">
+                            {note.points_interro ?? "—"}
+                          </td>
+                          <td className="px-4 py-3">
+                            {note.points_examen ?? "—"}
+                          </td>
+                          <td className="px-4 py-3 font-black">
+                            {note.total}
+                          </td>
+                          <td className="px-4 py-3">{note.maximum}</td>
+                          <td className="px-4 py-3">{note.credit}</td>
+                          <td className="px-4 py-3">{note.ponderation}</td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {note.session_nom}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`rounded-full px-2.5 py-1 text-xs font-bold ${note.reussi ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}
+                            >
+                              {note.reussi ? "Réussi" : "Échoué"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-50/80 px-4 py-8 sm:px-6 lg:px-8">
       <Toaster richColors position="top-right" />
@@ -297,17 +618,38 @@ const JuryEtudiants = () => {
           </div>
           <div className="flex flex-wrap gap-2">
             <button
-              onClick={() => setAfficherConsolides(!afficherConsolides)}
+              onClick={() => navigate("/jury/resultats-consolides")}
               disabled={!sessionCourante?.est_cloture}
-              className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-bold text-violet-700 disabled:opacity-40"
+              className="inline-flex items-center gap-2 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-black text-violet-700 shadow-sm transition hover:-translate-y-0.5 hover:border-violet-300 hover:bg-violet-100 hover:shadow-md disabled:translate-y-0 disabled:opacity-40 disabled:shadow-none"
             >
               <Award className="h-4 w-4" />
               Résultats consolidés
             </button>
             <button
+              onClick={() => navigate("/jury/cotes")}
+              className="inline-flex items-center gap-2 rounded-2xl border border-blue-700 bg-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-md"
+            >
+              <Users className="h-4 w-4" />
+              Cotes des Etudiants
+            </button>
+            <button
+              onClick={() => navigate("/jury/fin-annee")}
+              className="inline-flex items-center gap-2 rounded-2xl border border-amber-300 bg-amber-500 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-amber-600 hover:shadow-md"
+            >
+              <Award className="h-4 w-4" />
+              Résultats fin d’année
+            </button>
+            <button
+              onClick={() => navigate("/jury/fusions-cours")}
+              className="inline-flex items-center gap-2 rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-2.5 text-sm font-black text-cyan-700 shadow-sm transition hover:-translate-y-0.5 hover:border-cyan-300 hover:bg-cyan-100 hover:shadow-md"
+            >
+              <Layers3 className="h-4 w-4" />
+              Fusionner des cours
+            </button>
+            <button
               onClick={() => setAfficherCloture(true)}
               disabled={!anneeCourante?.est_active}
-              className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-40"
+              className="inline-flex items-center gap-2 rounded-2xl bg-violet-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-violet-700 hover:shadow-md disabled:translate-y-0 disabled:opacity-40 disabled:shadow-none"
             >
               <Layers3 className="h-4 w-4" />
               Créer une clôture
@@ -315,7 +657,7 @@ const JuryEtudiants = () => {
             <button
               onClick={() => setAfficherPromotion(true)}
               disabled={actionEnCours || !promotionsEnAttente.length}
-              className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-40"
+              className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-md disabled:translate-y-0 disabled:opacity-40 disabled:shadow-none"
             >
               <ArrowUpCircle className="h-4 w-4" />
               Promouvoir les admis ({promotionsEnAttente.length})
@@ -441,20 +783,8 @@ const JuryEtudiants = () => {
               Année clôturée — consultation uniquement.
             </div>
           )}
-          {sessionCourante?.est_cloture && (
+          {afficherAncienOverlayConsolides && sessionCourante?.est_cloture && (
             <div className="border-b bg-violet-50/60 p-5">
-              <div className="mb-4 flex items-center gap-2">
-                <Award className="h-5 w-5 text-violet-700" />
-                <div>
-                  <h3 className="font-black text-violet-950">
-                    Résultats consolidés sans répétition
-                  </h3>
-                  <p className="text-xs text-violet-700">
-                    Pour chaque cours, la meilleure cote parmi les sessions
-                    incluses est retenue.
-                  </p>
-                </div>
-              </div>
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {visibles.map((etudiant) => (
                   <button
@@ -669,6 +999,23 @@ const JuryEtudiants = () => {
                   className="mt-1.5 w-full rounded-xl border px-3 py-2.5 font-normal"
                 />
               </label>
+              <label className="sm:col-span-2 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-800">
+                <input
+                  type="checkbox"
+                  checked={cloture.est_fin_annee}
+                  onChange={(e) =>
+                    setCloture({ ...cloture, est_fin_annee: e.target.checked })
+                  }
+                  className="mt-1"
+                />
+                <span>
+                  Fin d’année
+                  <small className="mt-1 block font-normal text-amber-700">
+                    Active le calcul automatique du pourcentage, des échecs et
+                    des décisions S, D, GD, AA, A, NF.
+                  </small>
+                </span>
+              </label>
               <fieldset className="sm:col-span-2">
                 <legend className="mb-2 text-sm font-bold text-slate-700">
                   Sessions à consolider
@@ -869,7 +1216,7 @@ const JuryEtudiants = () => {
           </div>
         </div>
       )}
-      {afficherConsolides && (
+      {afficherAncienOverlayConsolides && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
           <div className="max-h-[92vh] w-full max-w-6xl overflow-auto rounded-3xl bg-white p-6 shadow-2xl">
             <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -894,7 +1241,7 @@ const JuryEtudiants = () => {
                   <option value="SANS_NOTE">Sans résultat consolidé</option>
                 </select>
                 <button
-                  onClick={() => setAfficherConsolides(false)}
+                  onClick={() => setRapport(null)}
                   className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"
                 >
                   <X className="h-5 w-5" />

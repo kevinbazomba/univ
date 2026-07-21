@@ -6,6 +6,7 @@ import PrivateRoute from './components/PrivateRoute';
 import StudentRoute from './components/StudentRoute';
 import ProfessorRoute from './components/ProfessorRoute';
 import BarreNavigation from './components/BarreNavigation';
+import JuryTokenGate from './components/JuryTokenGate';
 
 // ========== IMPORTS ÉTUDIANTS ==========
 import ListeEtudiants from './pages/etudiants/ListeEtudiants';
@@ -52,6 +53,9 @@ import GestionApplicationDetail from './pages/enseignements/GestionApplications/
 import AppliquerCoursList from './pages/enseignements/AppliquerCours/AppliquerCoursList';
 import AppliquerCoursByEtudiant from './pages/enseignements/AppliquerCours/AppliquerCoursByEtudiant';
 import JuryEtudiants from './pages/enseignements/Jury/JuryEtudiants';
+import FusionCoursJury from './pages/enseignements/Jury/FusionCoursJury';
+import JuryCotesEtudiants from './pages/enseignements/Jury/JuryCotesEtudiants';
+import JuryFinAnnee from './pages/enseignements/Jury/JuryFinAnnee';
 
 
 function App() {
@@ -66,7 +70,14 @@ function App() {
         {/* ========== ROUTES AUTHENTIFICATION ========== */}
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<PortailInscription />} />
-        <Route path="/" element={<Login />} />
+        <Route
+          path="/"
+          element={
+            <PrivateRoute>
+              <Dashboard />
+            </PrivateRoute>
+          }
+        />
         <Route
           path="/espace-etudiant"
           element={
@@ -181,7 +192,11 @@ function App() {
         />
 
         {/* ========== ROUTES ENSEIGNEMENTS ========== */}
-        <Route path="/jury" element={<PrivateRoute><JuryEtudiants /></PrivateRoute>} />
+        <Route path="/jury" element={<PrivateRoute><JuryTokenGate><JuryEtudiants /></JuryTokenGate></PrivateRoute>} />
+        <Route path="/jury/resultats-consolides" element={<PrivateRoute><JuryTokenGate><JuryEtudiants resultatsConsolides /></JuryTokenGate></PrivateRoute>} />
+        <Route path="/jury/fusions-cours" element={<PrivateRoute><JuryTokenGate><FusionCoursJury /></JuryTokenGate></PrivateRoute>} />
+        <Route path="/jury/cotes" element={<PrivateRoute><JuryTokenGate><JuryCotesEtudiants /></JuryTokenGate></PrivateRoute>} />
+        <Route path="/jury/fin-annee" element={<PrivateRoute><JuryTokenGate><JuryFinAnnee /></JuryTokenGate></PrivateRoute>} />
         {/* Dashboard Enseignements */}
         <Route
           path="/enseignements"

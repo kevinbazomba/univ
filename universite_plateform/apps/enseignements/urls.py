@@ -8,7 +8,7 @@ from .views import (
     AppliquerCoursViewSet,
     FaculteViewSet,
     PromotionViewSet,
-    AnneeAcademiqueViewSet, JuryViewSet
+    AnneeAcademiqueViewSet, JuryViewSet, FusionCoursJuryViewSet
 )
 
 # Création du routeur
@@ -24,6 +24,7 @@ router.register(r'facultes', FaculteViewSet, basename='faculte')
 router.register(r'promotions', PromotionViewSet, basename='promotion')
 router.register(r'annees-academiques', AnneeAcademiqueViewSet, basename='annee-academique')
 router.register(r'jury', JuryViewSet, basename='jury')
+router.register(r'fusions-cours-jury', FusionCoursJuryViewSet, basename='fusion-cours-jury')
 
 # Les URLs
 urlpatterns = [

@@ -32,6 +32,7 @@ urlpatterns = [
     path('api/', include('apps.etudiants.urls')),  # ← Important pour /api/etudiants  /
     path('api/frais/', include('apps.frais_academique.urls')),
     path('api/', include('apps.enseignements.urls')),
+    path('api/', include('apps.jury_access.urls')),
 
 ]
 
